@@ -7,7 +7,7 @@ import argparse
 import os
 import time
 from cp_dataset import CPDataset, CPDataLoader
-from networks import GMM, UnetGenerator, VGGLoss, load_checkpoint, save_checkpoint
+from networks import GMM, UnetGenerator, VGGLoss, load_checkpoint, save_checkpoint, load_checkpoints, save_checkpoints, Discriminator_G, Discriminator_L
 
 from tensorboardX import SummaryWriter
 from visualization import board_add_image, board_add_images
@@ -101,22 +101,34 @@ def train_gmm(opt, train_loader, model, board):
             save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'step_%06d.pth' % (step+1)))
 
 
-def train_tom(opt, train_loader, model, board):
+def train_tom(opt, train_loader, model, d_g, d_l, board):
     model.cuda()
     model.train()
+    d_g.cuda()
+    d_g.train()
+    d_l.cuda()
+    d_l.train()
     
     # criterion
     criterionL1 = nn.L1Loss()
     criterionVGG = VGGLoss()
     criterionMask = nn.L1Loss()
+    criterionGAN = nn.BCELoss()#MSE
     
     # optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr, betas=(0.5, 0.999))
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda = lambda step: 1.0 -
+    optimizerG = torch.optim.Adam(model.parameters(), lr=opt.lr, betas=(0.5, 0.999))
+    optimizerDG = torch.optim.Adam(d_g.parameters(), lr=opt.lr, betas=(0.5, 0.999))
+    optimizerDL = torch.optim.Adam(d_l.parameters(), lr=opt.lr, betas=(0.5, 0.999))
+    schedulerG = torch.optim.lr_scheduler.LambdaLR(optimizerG, lr_lambda = lambda step: 1.0 -
+            max(0, step - opt.keep_step) / float(opt.decay_step + 1))
+    schedulerDG = torch.optim.lr_scheduler.LambdaLR(optimizerDG, lr_lambda = lambda step: 1.0 -
+            max(0, step - opt.keep_step) / float(opt.decay_step + 1))
+    schedulerDL = torch.optim.lr_scheduler.LambdaLR(optimizerDL, lr_lambda = lambda step: 1.0 -
             max(0, step - opt.keep_step) / float(opt.decay_step + 1))
     
     for step in range(opt.keep_step + opt.decay_step):
         iter_start_time = time.time()
+        #prep
         inputs = train_loader.next_batch()
             
         im = inputs['image'].cuda()
@@ -127,24 +139,40 @@ def train_tom(opt, train_loader, model, board):
         agnostic = inputs['agnostic'].cuda()
         c = inputs['cloth'].cuda()
         cm = inputs['cloth_mask'].cuda()
-        
+        batch_size = im.size(0)
+
+        optimizerDG.zero_grad()
+        optimizerDL.zero_grad()
+        #D_real
+        dis_label.data.resize_(batch_size).fill_(1)
+        dis_g_output = d_g(im)
+        errDg_real = dis_criterion(dis_g_output, dis_label)
+        errDg_real.backward()
+
+        #tom_gen
         outputs = model(torch.cat([agnostic, c],1))
         p_rendered, m_composite = torch.split(outputs, 3,1)
         p_rendered = F.tanh(p_rendered)
         m_composite = F.sigmoid(m_composite)
         p_tryon = c * m_composite+ p_rendered * (1 - m_composite)
 
-        visuals = [ [im_h, shape, im_pose], 
-                   [c, cm*2-1, m_composite*2-1], 
-                   [p_rendered, p_tryon, im]]
-            
+        #D_fake
+        dis_label.data.fill_(0)
+        dis_g_output = d_g(p_tryon.detach())
+        errDg_fake = dis_criterion(dis_g_output, dis_label)
+        errDg_fake.backward()
+        optimizerDG.step()
+        optimizerDL.step()
+
+        #tom_train
         loss_l1 = criterionL1(p_tryon, im)
         loss_vgg = criterionVGG(p_tryon, im)
         loss_mask = criterionMask(m_composite, cm)
         loss = loss_l1 + loss_vgg + loss_mask
-        optimizer.zero_grad()
+
+        optimizerG.zero_grad()
         loss.backward()
-        optimizer.step()
+        optimizerG.step()
             
         if (step+1) % opt.display_count == 0:
             
@@ -161,10 +189,9 @@ def train_tom(opt, train_loader, model, board):
                     (step+1, t, loss.item(), loss_l1.item(), 
                     loss_vgg.item(), loss_mask.item()), flush=True)
             
-            
-
         if (step+1) % opt.save_count == 0:
-            save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'step_%06d.pth' % (step+1)))
+                save_checkpoints(model, d_g, d_l, 
+                    os.path.join(opt.checkpoint_dir, opt.stage +'_'+ opt.name+"_step%06d"%step, '%s.pth'))
 
 
 
@@ -193,10 +220,16 @@ def main():
         save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'gmm_final.pth'))
     elif opt.stage == 'TOM':
         model = UnetGenerator(25, 4, 6, ngf=64, norm_layer=nn.InstanceNorm2d)
+        d_g= Discriminator_G(opt)
+        d_l= Discriminator_L(opt)
         if not opt.checkpoint =='' and os.path.exists(opt.checkpoint):
-            load_checkpoint(model, opt.checkpoint)
-        train_tom(opt, train_loader, model, board)
-        save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'tom_final.pth'))
+            if not os.path.isdir(opt.checkpoint):
+                raise NotImplementedError('checkpoint should be dir, not file: %s' % opt.checkpoint)
+            load_checkpoints(model, d_g, d_l, os.path.join(opt.checkpoint, "%s.pth"))
+        train_tom(opt, train_loader, model, d_g, d_l, board)
+
+        save_checkpoints(model, d_g, d_l, 
+            os.path.join(opt.checkpoint_dir, opt.stage +'_'+ opt.name+"_final", '%s.pth'))
     else:
         raise NotImplementedError('Model [%s] is not implemented' % opt.stage)
         

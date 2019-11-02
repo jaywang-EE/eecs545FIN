@@ -7,6 +7,69 @@ import os
 
 import numpy as np
 
+
+class Discriminator_G(nn.Module):
+    def __init__(self, opts):
+        super(Discriminator_G, self).__init__()
+        input_nc = 3
+
+        # A bunch of convolutions one after another
+        model = [   nn.Conv2d(input_nc, 64, 4, stride=2, padding=1),
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        model += [  nn.Conv2d(64, 128, 4, stride=2, padding=1),
+                    nn.InstanceNorm2d(128), 
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        model += [  nn.Conv2d(128, 256, 4, stride=2, padding=1),
+                    nn.InstanceNorm2d(256), 
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        model += [  nn.Conv2d(256, 512, 4, padding=1),
+                    nn.InstanceNorm2d(512), 
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        # FCN classification layer
+        model += [nn.Conv2d(512, 1, 4, padding=1)]
+
+        self.model = nn.Sequential(*model)
+
+    def forward(self, x):
+        x =  self.model(x)
+        # Average pooling and flatten
+        return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
+
+class Discriminator_D(nn.Module):#TODO
+    def __init__(self, input_nc):
+        super(Discriminator_G, self).__init__()
+        input_nc = 3
+
+        # A bunch of convolutions one after another
+        model = [   nn.Conv2d(input_nc, 64, 4, stride=2, padding=1),
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        model += [  nn.Conv2d(64, 128, 4, stride=2, padding=1),
+                    nn.InstanceNorm2d(128), 
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        model += [  nn.Conv2d(128, 256, 4, stride=2, padding=1),
+                    nn.InstanceNorm2d(256), 
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        model += [  nn.Conv2d(256, 512, 4, padding=1),
+                    nn.InstanceNorm2d(512), 
+                    nn.LeakyReLU(0.2, inplace=True) ]
+
+        # FCN classification layer
+        model += [nn.Conv2d(512, 1, 4, padding=1)]
+
+        self.model = nn.Sequential(*model)
+
+    def forward(self, x):
+        x =  self.model(x)
+        # Average pooling and flatten
+        return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
+
 def weights_init_normal(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
@@ -423,16 +486,33 @@ class GMM(nn.Module):
         grid = self.gridGen(theta)
         return grid, theta
 
+def load_checkpoints(model, d_g, d_l, checkpoint_template):
+    if not os.path.exists(checkpoint_template%"tom"): return
+    if not os.path.exists(checkpoint_template%"D_G"): return
+    if not os.path.exists(checkpoint_template%"D_L"): return
+    model.load_state_dict(torch.load(checkpoint_template%"tom"))
+    d_g.load_state_dict(torch.load(checkpoint_template%"D_G"))
+    d_l.load_state_dict(torch.load(checkpoint_template%"D_L"))
+    model.cuda()
+    d_g.cuda()
+    d_l.cuda()
+
+def save_checkpoints(model, d_g, d_l, save_template):
+    save_checkpoint(model, save_template%"tom")
+    save_checkpoint(d_g, save_template%"D_G")
+    save_checkpoint(d_l, save_template%"D_L")
+
 def save_checkpoint(model, save_path):
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
 
     torch.save(model.cpu().state_dict(), save_path)
     model.cuda()
-
+    
 def load_checkpoint(model, checkpoint_path):
     if not os.path.exists(checkpoint_path):
-        return
+        return 
     model.load_state_dict(torch.load(checkpoint_path))
     model.cuda()
+
 
