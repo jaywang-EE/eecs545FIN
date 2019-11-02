@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 import argparse
 import os
@@ -22,7 +23,7 @@ def get_opt():
     
     parser.add_argument("--dataroot", default = "data")
     parser.add_argument("--datamode", default = "train")
-    parser.add_argument("--stage", default = "GMM")
+    parser.add_argument('-s', "--stage", default = "GMM")
     parser.add_argument("--data_list", default = "train_pairs.txt")
     parser.add_argument("--fine_width", type=int, default = 192)
     parser.add_argument("--fine_height", type=int, default = 256)
@@ -89,7 +90,7 @@ def train_gmm(opt, train_loader, model, board):
             board.add_scalar('metric', loss.item(), step+1)
             
         #change
-        if (step+1) % len(train_loader.data_loader)
+        if (step+1) % len(train_loader.data_loader):
             t = time.time() - iter_start_time
             loss_avr = loss_sum/(step+1) 
             print('step: %8d, time: %.3f, loss: %.4f, l1: %.4f, vgg: %.4f, mask: %.4f' 
@@ -108,6 +109,8 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
     d_g.train()
     d_l.cuda()
     d_l.train()
+
+    dis_label = Variable(torch.FloatTensor(opt.batch_size)).cuda()
     
     # criterion
     criterionL1 = nn.L1Loss()
@@ -146,7 +149,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         #D_real
         dis_label.data.resize_(batch_size).fill_(1)
         dis_g_output = d_g(im)
-        errDg_real = dis_criterion(dis_g_output, dis_label)
+        errDg_real = criterionGAN(dis_g_output, dis_label)
         errDg_real.backward()
 
         #tom_gen
@@ -159,7 +162,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         #D_fake
         dis_label.data.fill_(0)
         dis_g_output = d_g(p_tryon.detach())
-        errDg_fake = dis_criterion(dis_g_output, dis_label)
+        errDg_fake = criterionGAN(dis_g_output, dis_label)
         errDg_fake.backward()
         optimizerDG.step()
         optimizerDL.step()
@@ -182,10 +185,10 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
             board.add_scalar('VGG', loss_vgg.item(), step+1)
             board.add_scalar('MaskL1', loss_mask.item(), step+1)
 
-        if (step+1) % len(train_loader.data_loader)
+        if (step+1) % len(train_loader.data_loader):
             t = time.time() - iter_start_time
             
-            print('step: %8d, time: %.3f, loss: %.4f, l1: %.4f, vgg: %.4f, mask: %.4f' 
+            print('step: %8d, time: %.3f, loss: %.4f, l1: %.4f, vgg: %.4f, mask: %.4f'% 
                     (step+1, t, loss.item(), loss_l1.item(), 
                     loss_vgg.item(), loss_mask.item()), flush=True)
             

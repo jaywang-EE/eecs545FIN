@@ -1,6 +1,7 @@
 #coding=utf-8
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import init
 from torchvision import models
 import os
@@ -39,9 +40,9 @@ class Discriminator_G(nn.Module):
         # Average pooling and flatten
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
 
-class Discriminator_D(nn.Module):#TODO
-    def __init__(self, input_nc):
-        super(Discriminator_G, self).__init__()
+class Discriminator_L(nn.Module):#TODO
+    def __init__(self, opt):
+        super(Discriminator_L, self).__init__()
         input_nc = 3
 
         # A bunch of convolutions one after another
