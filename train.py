@@ -176,6 +176,11 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         optimizerG.zero_grad()
         loss.backward()
         optimizerG.step()
+        
+        #tensorboradX
+        visuals = [ [im_h, shape, im_pose], 
+                   [c, cm*2-1, m_composite*2-1], 
+                   [p_rendered, p_tryon, im]]
             
         if (step+1) % opt.display_count == 0:
             
