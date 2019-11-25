@@ -11,8 +11,10 @@ from cp_dataset import CPDataset, CPDataLoader
 from networks import GMM, UnetGenerator, VGGLoss, load_checkpoint, save_checkpoint, load_checkpoints, save_checkpoints, Discriminator_G, Discriminator_L
 
 from tensorboardX import SummaryWriter
-from visualization import board_add_image, board_add_images
+from visualization import board_add_image, board_add_images, save_images, sm_image, combine_images
 
+from datetime import datetime
+import random
 
 def get_opt():
     parser = argparse.ArgumentParser()
@@ -37,14 +39,13 @@ def get_opt():
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='save checkpoint infos')
     parser.add_argument('--checkpoint', type=str, default='', help='model checkpoint for initialization')
     parser.add_argument("--display_count", type=int, default = 20)
-    parser.add_argument("--save_count", type=int, default = 100)
+    parser.add_argument("--save_count", type=int, default = 1000)
     parser.add_argument("--keep_step", type=int, default = 100000)
     parser.add_argument("--decay_step", type=int, default = 100000)
     parser.add_argument("--shuffle", action='store_true', help='shuffle input data')
 
     opt = parser.parse_args()
     return opt
-
 
 def train_gmm(opt, train_loader, model, board):
     # change
@@ -84,7 +85,7 @@ def train_gmm(opt, train_loader, model, board):
                    [c, warped_cloth, im_c], 
                    [warped_grid, (warped_cloth+im)*0.5, im]]
         
-        loss = criterionL1(warped_cloth, im_c)    
+        loss = criterionL1(warped_cloth, im_c)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -106,6 +107,10 @@ def train_gmm(opt, train_loader, model, board):
             save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'step_%06d.pth' % (step+1)))
 
 
+def random_crop(reals, fakes, winsize):
+    y, x = [random.randint(reals.size(i)//4, int(reals.size(i)*0.75)-winsize-1) for i in (2, 3)]
+    return reals[:,:,y:y+winsize,x:x+winsize], fakes[:,:,y:y+winsize,x:x+winsize]
+
 def train_tom(opt, train_loader, model, d_g, d_l, board):
     model.cuda()
     model.train()
@@ -120,7 +125,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
     criterionL1 = nn.L1Loss()
     criterionVGG = VGGLoss()
     criterionMask = nn.L1Loss()
-    criterionGAN = nn.BCELoss()#MSE
+    criterionGAN = nn.MSELoss()#MSE
     
     # optimizer
     optimizerG = torch.optim.Adam(model.parameters(), lr=opt.lr, betas=(0.5, 0.999))
@@ -203,10 +208,10 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
             loss_dict = {"metric":loss.item(), "L1":loss_l1.item(), "VGG":loss_vgg.item(), 
                          "Mask":loss_mask.item(), "DG":((errDg_fake+errDg_real)/2).item(), 
                          "DL":((errDl_fake+errDl_real)/2).item()}
-            print('step: %8d, time: %.3f'%(step+1, t, loss.item()), end="")
+            print('step: %8d, time: %.3f'%(step+1, t), end="")
             
             board_add_images(board, 'combine', visuals, step+1)
-            for k, v in loss_dict.getitems():
+            for k, v in loss_dict.items():
                 print('%s: %.4f'%(k, v), end="")
                 board.add_scalar(k, v, step+1)
             print()
@@ -215,8 +220,6 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
             sm_image(combine_images(im, p_tryon, real_crop, fake_crop), "combined%d.jpg"%step, opt.debug)
             save_checkpoints(model, d_g, d_l, 
                 os.path.join(opt.checkpoint_dir, opt.stage +'_'+ opt.name, "step%06d"%step, '%s.pth'))
-
-
 
 def main():
     opt = get_opt()
@@ -233,7 +236,7 @@ def main():
     if not os.path.exists(opt.tensorboard_dir):
         os.makedirs(opt.tensorboard_dir)
     board = SummaryWriter(log_dir = os.path.join(opt.tensorboard_dir, opt.name))
-   
+    
     # create model & train & save the final checkpoint
     if opt.stage == 'GMM':
         model = GMM(opt)
