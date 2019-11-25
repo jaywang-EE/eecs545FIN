@@ -16,10 +16,13 @@ from visualization import board_add_image, board_add_images
 
 def get_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name", default = "GMM")
+    parser.add_argument("--name", default = datetime.now().strftime("%m%d_%H%M"))
     parser.add_argument("--gpu_ids", default = "")
     parser.add_argument('-j', '--workers', type=int, default=1)
     parser.add_argument('-b', '--batch-size', type=int, default=4)
+    parser.add_argument('-d', '--debug', type=str, default="debug")
+    parser.add_argument('-w', '--winsize', type=int, default=48)
+
     
     parser.add_argument("--dataroot", default = "data")
     parser.add_argument("--datamode", default = "train")
@@ -41,6 +44,7 @@ def get_opt():
 
     opt = parser.parse_args()
     return opt
+
 
 def train_gmm(opt, train_loader, model, board):
     # change
@@ -134,7 +138,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         #prep
         inputs = train_loader.next_batch()
             
-        im = inputs['image'].cuda()
+        im = inputs['image'].cuda()#sz=b*3*256*192
         im_pose = inputs['pose_image']
         im_h = inputs['head']
         shape = inputs['shape']
@@ -149,6 +153,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         #D_real
         dis_label.data.resize_(batch_size).fill_(1)
         dis_g_output = d_g(im)
+        
         errDg_real = criterionGAN(dis_g_output, dis_label)
         errDg_real.backward()
 
@@ -158,13 +163,23 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         p_rendered = F.tanh(p_rendered)
         m_composite = F.sigmoid(m_composite)
         p_tryon = c * m_composite+ p_rendered * (1 - m_composite)
+        
+        real_crop, fake_crop = random_crop(im, p_tryon, opt.winsize)
+        dis_l_output = d_l(real_crop)
+        errDl_real = criterionGAN(dis_l_output, dis_label)
+        errDl_real.backward()
 
         #D_fake
         dis_label.data.fill_(0)
+
         dis_g_output = d_g(p_tryon.detach())
         errDg_fake = criterionGAN(dis_g_output, dis_label)
         errDg_fake.backward()
         optimizerDG.step()
+
+        dis_l_output = d_l(fake_crop.detach())
+        errDl_fake = criterionGAN(dis_l_output, dis_label)
+        errDl_fake.backward()
         optimizerDL.step()
 
         #tom_train
@@ -183,23 +198,23 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
                    [p_rendered, p_tryon, im]]
             
         if (step+1) % opt.display_count == 0:
-            
-            board_add_images(board, 'combine', visuals, step+1)
-            board.add_scalar('metric', loss.item(), step+1)
-            board.add_scalar('L1', loss_l1.item(), step+1)
-            board.add_scalar('VGG', loss_vgg.item(), step+1)
-            board.add_scalar('MaskL1', loss_mask.item(), step+1)
-
-        if (step+1) % len(train_loader.data_loader):
             t = time.time() - iter_start_time
             
-            print('step: %8d, time: %.3f, loss: %.4f, l1: %.4f, vgg: %.4f, mask: %.4f'% 
-                    (step+1, t, loss.item(), loss_l1.item(), 
-                    loss_vgg.item(), loss_mask.item()), flush=True)
+            loss_dict = {"metric":loss.item(), "L1":loss_l1.item(), "VGG":loss_vgg.item(), 
+                         "Mask":loss_mask.item(), "DG":((errDg_fake+errDg_real)/2).item(), 
+                         "DL":((errDl_fake+errDl_real)/2).item()}
+            print('step: %8d, time: %.3f'%(step+1, t, loss.item()), end="")
+            
+            board_add_images(board, 'combine', visuals, step+1)
+            for k, v in loss_dict.getitems():
+                print('%s: %.4f'%(k, v), end="")
+                board.add_scalar(k, v, step+1)
+            print()
             
         if (step+1) % opt.save_count == 0:
-                save_checkpoints(model, d_g, d_l, 
-                    os.path.join(opt.checkpoint_dir, opt.stage +'_'+ opt.name+"_step%06d"%step, '%s.pth'))
+            sm_image(combine_images(im, p_tryon, real_crop, fake_crop), "combined%d.jpg"%step, opt.debug)
+            save_checkpoints(model, d_g, d_l, 
+                os.path.join(opt.checkpoint_dir, opt.stage +'_'+ opt.name, "step%06d"%step, '%s.pth'))
 
 
 

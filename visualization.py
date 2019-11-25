@@ -3,6 +3,8 @@ import torch
 from PIL import Image
 import os
 
+from torchvision.utils import save_image
+
 def tensor_for_board(img_tensor):
     # map into [0,1]
     tensor = (img_tensor.clone()+1) * 0.5
@@ -43,7 +45,18 @@ def board_add_images(board, tag_name, img_tensors_list, step_count):
     for i, img in enumerate(tensor):
         board.add_image('%s/%03d' % (tag_name, i), img, step_count)
 
+def sm_image(img_tensor, img_name, save_dir):
+    if not os.path.exists(save_dir): os.makedirs(save_dir) 
+    save_image(img_tensor, os.path.join(save_dir, img_name))
+
+def combine_images(r, f, rc, fc):
+    new_crop_size = (r.shape[3], r.shape[3])
+    rcn = torch.nn.functional.interpolate(rc, new_crop_size)
+    fcn = torch.nn.functional.interpolate(fc, new_crop_size)
+    return torch.cat((torch.cat((r, rcn), 2), torch.cat((f, fcn), 2)), 0)
+
 def save_images(img_tensors, img_names, save_dir):
+    if not os.path.exists(save_dir): os.makedirs(save_dir) 
     for img_tensor, img_name in zip(img_tensors, img_names):
         tensor = (img_tensor.clone()+1)*0.5 * 255
         tensor = tensor.cpu().clamp(0,255)
