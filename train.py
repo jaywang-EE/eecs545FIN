@@ -205,19 +205,19 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         if (step+1) % opt.display_count == 0:
             t = time.time() - iter_start_time
             
-            loss_dict = {"metric":loss.item(), "L1":loss_l1.item(), "VGG":loss_vgg.item(), 
-                         "Mask":loss_mask.item(), "DG":((errDg_fake+errDg_real)/2).item(), 
+            loss_dict = {"TOT":loss.item(), "L1":loss_l1.item(), "VG":loss_vgg.item(), 
+                         "Mk":loss_mask.item(), "DG":((errDg_fake+errDg_real)/2).item(), 
                          "DL":((errDl_fake+errDl_real)/2).item()}
-            print('step: %8d, time: %.3f'%(step+1, t), end="")
+            print('step: %d|time: %.3f'%(step+1, t), end="")
             
+            sm_image(combine_images(im, p_tryon, real_crop, fake_crop), "combined%d.jpg"%step, opt.debug)
             board_add_images(board, 'combine', visuals, step+1)
             for k, v in loss_dict.items():
-                print('%s: %.4f'%(k, v), end="")
+                print('|%s: %.3f'%(k, v), end="")
                 board.add_scalar(k, v, step+1)
             print()
             
         if (step+1) % opt.save_count == 0:
-            sm_image(combine_images(im, p_tryon, real_crop, fake_crop), "combined%d.jpg"%step, opt.debug)
             save_checkpoints(model, d_g, d_l, 
                 os.path.join(opt.checkpoint_dir, opt.stage +'_'+ opt.name, "step%06d"%step, '%s.pth'))
 
