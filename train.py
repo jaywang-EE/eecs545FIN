@@ -38,6 +38,7 @@ def get_opt():
     parser.add_argument('--tensorboard_dir', type=str, default='tensorboard', help='save tensorboard infos')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='save checkpoint infos')
     parser.add_argument('--checkpoint', type=str, default='', help='model checkpoint for initialization')
+    parser.add_argument('-g', '--checkpointG', type=str, default='', help='generator checkpoint for initialization')
     parser.add_argument("--display_count", type=int, default = 20)
     parser.add_argument("--save_count", type=int, default = 1000)
     parser.add_argument("--keep_step", type=int, default = 100000)
@@ -93,15 +94,6 @@ def train_gmm(opt, train_loader, model, board):
         if (step+1) % opt.display_count == 0:
             board_add_images(board, 'combine', visuals, step+1)
             board.add_scalar('metric', loss.item(), step+1)
-            
-        #change
-        if (step+1) % len(train_loader.data_loader):
-            t = time.time() - iter_start_time
-            loss_avr = loss_sum/(step+1) 
-            print('step: %8d, time: %.3f, loss: %.4f, l1: %.4f, vgg: %.4f, mask: %.4f' 
-                    (step+1, t, loss_avr, loss_l1.item(), 
-                    loss_vgg.item(), loss_mask.item()), flush=True)
-            loss_sum = 0
 
         if (step+1) % opt.save_count == 0:
             save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'step_%06d.pth' % (step+1)))
@@ -149,6 +141,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         shape = inputs['shape']
 
         agnostic = inputs['agnostic'].cuda()
+        im_r = inputs['rest'].cuda()
         c = inputs['cloth'].cuda()
         cm = inputs['cloth_mask'].cuda()
         batch_size = im.size(0)
@@ -156,13 +149,15 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         optimizerDG.zero_grad()
         optimizerDL.zero_grad()
         #D_real
-        dis_label.data.resize_(batch_size).fill_(1)
+        dis_label.data.fill_(1)
         dis_g_output = d_g(im)
         
         errDg_real = criterionGAN(dis_g_output, dis_label)
         errDg_real.backward()
 
-        #tom_gen
+        #sm_image(im_r, "raw_input%d.jpg"%step, opt.debug)
+
+        #generate image
         outputs = model(torch.cat([agnostic, c],1))
         p_rendered, m_composite = torch.split(outputs, 3,1)
         p_rendered = F.tanh(p_rendered)
@@ -188,10 +183,14 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         optimizerDL.step()
 
         #tom_train
+        dis_label.data.fill_(1.)
+        gen_output = d_g(p_tryon)
+        errG_fake = criterionGAN(gen_output, dis_label)
+
         loss_l1 = criterionL1(p_tryon, im)
         loss_vgg = criterionVGG(p_tryon, im)
         loss_mask = criterionMask(m_composite, cm)
-        loss = loss_l1 + loss_vgg + loss_mask
+        loss = loss_l1 + loss_vgg + loss_mask + errG_fake
 
         optimizerG.zero_grad()
         loss.backward()
@@ -252,6 +251,8 @@ def main():
             if not os.path.isdir(opt.checkpoint):
                 raise NotImplementedError('checkpoint should be dir, not file: %s' % opt.checkpoint)
             load_checkpoints(model, d_g, d_l, os.path.join(opt.checkpoint, "%s.pth"))
+        elif not opt.checkpointG =='' and os.path.exists(opt.checkpointG):
+            load_checkpoint(model, opt.checkpointG)
         train_tom(opt, train_loader, model, d_g, d_l, board)
 
         save_checkpoints(model, d_g, d_l, 
