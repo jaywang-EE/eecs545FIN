@@ -126,12 +126,15 @@ class CPDataset(data.Dataset):
         if self.stage == 'GMM':
             im_g = Image.open('grid.png')
             im_g = self.transform(im_g)
+            im_r = c
         else:
             im_g = ''
+            im_r = (im*(1 - pcm) + pcm)*(1-cm)+c*(cm)
 
         result = {
             'c_name':   c_name,     # for visualization
             'im_name':  im_name,    # for visualization or ground truth
+            'rest':    im_r,        # rest of body
             'cloth':    c,          # for input
             'cloth_mask':     cm,   # for input
             'image':    im,         # for visualization

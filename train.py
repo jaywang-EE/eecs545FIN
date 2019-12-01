@@ -111,13 +111,14 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
     d_l.cuda()
     d_l.train()
 
-    dis_label = Variable(torch.FloatTensor(opt.batch_size)).cuda()
+    dis_label_real = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(1.).cuda()
+    dis_label_fake = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(0.).cuda()
     
     # criterion
     criterionL1 = nn.L1Loss()
     criterionVGG = VGGLoss()
     criterionMask = nn.L1Loss()
-    criterionGAN = nn.MSELoss()#MSE
+    criterionGAN = nn.BCELoss()#MSE
     
     # optimizer
     optimizerG = torch.optim.Adam(model.parameters(), lr=opt.lr, betas=(0.5, 0.999))
@@ -146,56 +147,49 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         cm = inputs['cloth_mask'].cuda()
         batch_size = im.size(0)
 
-        optimizerDG.zero_grad()
-        optimizerDL.zero_grad()
         #D_real
-        dis_label.data.fill_(1)
-        dis_g_output = d_g(im)
-        
-        errDg_real = criterionGAN(dis_g_output, dis_label)
-        errDg_real.backward()
+        errDg_real = criterionGAN(d_g(im), dis_label_real)
 
         #sm_image(im_r, "raw_input%d.jpg"%step, opt.debug)
 
         #generate image
         outputs = model(torch.cat([agnostic, c],1))
         p_rendered, m_composite = torch.split(outputs, 3,1)
-        p_rendered = F.tanh(p_rendered)
-        m_composite = F.sigmoid(m_composite)
+        p_rendered = torch.tanh(p_rendered)
+        m_composite = torch.sigmoid(m_composite)
         p_tryon = c * m_composite+ p_rendered * (1 - m_composite)
         
         real_crop, fake_crop = random_crop(im, p_tryon, opt.winsize)
-        dis_l_output = d_l(real_crop)
-        errDl_real = criterionGAN(dis_l_output, dis_label)
-        errDl_real.backward()
-
-        #D_fake
-        dis_label.data.fill_(0)
-
-        dis_g_output = d_g(p_tryon.detach())
-        errDg_fake = criterionGAN(dis_g_output, dis_label)
-        errDg_fake.backward()
-        optimizerDG.step()
-
-        dis_l_output = d_l(fake_crop.detach())
-        errDl_fake = criterionGAN(dis_l_output, dis_label)
-        errDl_fake.backward()
-        optimizerDL.step()
+        errDl_real = criterionGAN(d_l(real_crop), dis_label_real)
 
         #tom_train
-        dis_label.data.fill_(1.)
-        gen_output = d_g(p_tryon)
-        errG_fake = criterionGAN(gen_output, dis_label)
+        errGg_fake = criterionGAN(d_g(p_tryon), dis_label_real)
+        errGl_fake = criterionGAN(d_l(fake_crop), dis_label_real)
 
         loss_l1 = criterionL1(p_tryon, im)
         loss_vgg = criterionVGG(p_tryon, im)
         loss_mask = criterionMask(m_composite, cm)
-        loss = loss_l1 + loss_vgg + loss_mask + errG_fake
+        loss_GAN = (errGg_fake+errGl_fake)/(batch_size*2)
+        loss = loss_l1 + loss_vgg + loss_mask + loss_GAN
+
+        #D_fake
+        errDg_fake = criterionGAN(d_g(p_tryon.detach()), dis_label_fake)
+        loss_Dg    = (errDg_fake+errDg_real)/2
+
+        errDl_fake = criterionGAN(d_l(fake_crop.detach()), dis_label_fake)
+        loss_Dl    = (errDl_fake+errDl_real)/2
 
         optimizerG.zero_grad()
         loss.backward()
         optimizerG.step()
         
+        optimizerDL.zero_grad()
+        loss_Dl.backward()
+        optimizerDL.step()
+
+        optimizerDG.zero_grad()
+        loss_Dg.backward()
+        optimizerDG.step()
         #tensorboradX
         visuals = [ [im_h, shape, im_pose], 
                    [c, cm*2-1, m_composite*2-1], 
@@ -205,8 +199,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
             t = time.time() - iter_start_time
             
             loss_dict = {"TOT":loss.item(), "L1":loss_l1.item(), "VG":loss_vgg.item(), 
-                         "Mk":loss_mask.item(), "DG":((errDg_fake+errDg_real)/2).item(), 
-                         "DL":((errDl_fake+errDl_real)/2).item()}
+                         "Mk":loss_mask.item(), "G":loss_GAN.item(), "DG":loss_Dg.item(), "DL":loss_Dl.item()}
             print('step: %d|time: %.3f'%(step+1, t), end="")
             
             sm_image(combine_images(im, p_tryon, real_crop, fake_crop), "combined%d.jpg"%step, opt.debug)
@@ -246,7 +239,7 @@ def main():
     elif opt.stage == 'TOM':
         model = UnetGenerator(25, 4, 6, ngf=64, norm_layer=nn.InstanceNorm2d)
         d_g= Discriminator_G(opt)
-        d_l= Discriminator_L(opt)
+        d_l= Discriminator_G(opt)#vanish L
         if not opt.checkpoint =='' and os.path.exists(opt.checkpoint):
             if not os.path.isdir(opt.checkpoint):
                 raise NotImplementedError('checkpoint should be dir, not file: %s' % opt.checkpoint)

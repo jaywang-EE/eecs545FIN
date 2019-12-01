@@ -10,9 +10,8 @@ import numpy as np
 
 
 class Discriminator_G(nn.Module):
-    def __init__(self, opts):
+    def __init__(self, opts, input_nc=3):
         super(Discriminator_G, self).__init__()
-        input_nc = 3
 
         # A bunch of convolutions one after another
         model = [   nn.Conv2d(input_nc, 64, 4, stride=2, padding=1),
@@ -34,11 +33,12 @@ class Discriminator_G(nn.Module):
         model += [nn.Conv2d(512, 1, 4, padding=1)]
 
         self.model = nn.Sequential(*model)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         x =  self.model(x)
         # Average pooling and flatten
-        return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
+        return self.sigmoid(F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1))
 
 class Discriminator_L(nn.Module):#TODO
     def __init__(self, opt):
@@ -347,8 +347,9 @@ class TpsGridGen(nn.Module):
 # at the bottleneck
 class UnetGenerator(nn.Module):
     def __init__(self, input_nc, output_nc, num_downs, ngf=64,
-                 norm_layer=nn.BatchNorm2d, use_dropout=False):
+                 norm_layer=nn.BatchNorm2d, use_dropout=False, clsf=False):
         super(UnetGenerator, self).__init__()
+        self.clsf = clsf
         # construct unet structure
         unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)
         for i in range(num_downs - 5):
@@ -359,8 +360,14 @@ class UnetGenerator(nn.Module):
         unet_block = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)
 
         self.model = unet_block
+        #if clsf:self.sm = nn.Softmax()
 
     def forward(self, input):
+        '''
+        if self.clsf:
+            return self.sm(self.model(input))
+        else:
+        '''
         return self.model(input)
 
 
@@ -467,9 +474,9 @@ class VGGLoss(nn.Module):
 class GMM(nn.Module):
     """ Geometric Matching Module
     """
-    def __init__(self, opt):
+    def __init__(self, opt, ipc1=22):
         super(GMM, self).__init__()
-        self.extractionA = FeatureExtraction(22, ngf=64, n_layers=3, norm_layer=nn.BatchNorm2d) 
+        self.extractionA = FeatureExtraction(ipc1, ngf=64, n_layers=3, norm_layer=nn.BatchNorm2d) 
         self.extractionB = FeatureExtraction(3, ngf=64, n_layers=3, norm_layer=nn.BatchNorm2d)
         self.l2norm = FeatureL2Norm()
         self.correlation = FeatureCorrelation()
@@ -487,6 +494,7 @@ class GMM(nn.Module):
         grid = self.gridGen(theta)
         return grid, theta
 
+
 def load_checkpoints(model, d_g, d_l, checkpoint_template):
     if not os.path.exists(checkpoint_template%"tom"): return
     if not os.path.exists(checkpoint_template%"D_G"): return
@@ -503,10 +511,23 @@ def save_checkpoints(model, d_g, d_l, save_template):
     save_checkpoint(d_g, save_template%"D_G")
     save_checkpoint(d_l, save_template%"D_L")
 
+def load_checkpoints_19(model, d_g, checkpoint_template):
+    if not os.path.exists(checkpoint_template%"HPM"): return
+    if not os.path.exists(checkpoint_template%"D_G"): return
+    model.load_state_dict(torch.load(checkpoint_template%"HPM"))
+    d_g.load_state_dict(torch.load(checkpoint_template%"D_G"))
+    model.cuda()
+    d_g.cuda()
+
+def save_checkpoints_19(model, d_g, save_path):
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path))
+    save_checkpoint(model, os.path.join(save_path, "HPM.pth"))
+    save_checkpoint(d_g, os.path.join(save_path, "D_G.pth"))
+
 def save_checkpoint(model, save_path):
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
-
     torch.save(model.cpu().state_dict(), save_path)
     model.cuda()
     
