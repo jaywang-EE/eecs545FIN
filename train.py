@@ -40,7 +40,7 @@ def get_opt():
     parser.add_argument('--checkpoint', type=str, default='', help='model checkpoint for initialization')
     parser.add_argument('-g', '--checkpointG', type=str, default='', help='generator checkpoint for initialization')
     parser.add_argument("--display_count", type=int, default = 20)
-    parser.add_argument("--save_count", type=int, default = 1000)
+    parser.add_argument("--save_count", type=int, default = 5000)
     parser.add_argument("--keep_step", type=int, default = 100000)
     parser.add_argument("--decay_step", type=int, default = 100000)
     parser.add_argument("--shuffle", action='store_true', help='shuffle input data')
@@ -111,8 +111,10 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
     d_l.cuda()
     d_l.train()
 
-    dis_label_real = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(1.).cuda()
-    dis_label_fake = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(0.).cuda()
+    #reverse label
+    dis_label_G    = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(0.).cuda()
+    dis_label_real = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(0.).cuda()
+    dis_label_fake = Variable(torch.FloatTensor(opt.batch_size, 1)).fill_(1.).cuda()
     
     # criterion
     criterionL1 = nn.L1Loss()
@@ -133,8 +135,13 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
     
     for step in range(opt.keep_step + opt.decay_step):
         iter_start_time = time.time()
-        #prep
 
+        #dis_label_noise
+        dis_label_noise = random.random()/10
+        dis_label_real = dis_label_real.data.fill_(0.0+random.random()/10)
+        dis_label_fake = dis_label_fake.data.fill_(1.0-random.random()/10)
+
+        #prep
         inputs = train_loader.next_batch()
             
         im = inputs['image'].cuda()#sz=b*3*256*192
@@ -165,8 +172,8 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         errDl_real = criterionGAN(d_l(real_crop), dis_label_real)
 
         #tom_train
-        errGg_fake = criterionGAN(d_g(p_tryon), dis_label_real)
-        errGl_fake = criterionGAN(d_l(fake_crop), dis_label_real)
+        errGg_fake = criterionGAN(d_g(p_tryon), dis_label_G)
+        errGl_fake = criterionGAN(d_l(fake_crop), dis_label_G)
 
         loss_l1 = criterionL1(p_tryon, im)
         loss_vgg = criterionVGG(p_tryon, im)
