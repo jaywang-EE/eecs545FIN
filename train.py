@@ -134,6 +134,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
     for step in range(opt.keep_step + opt.decay_step):
         iter_start_time = time.time()
         #prep
+
         inputs = train_loader.next_batch()
             
         im = inputs['image'].cuda()#sz=b*3*256*192
@@ -146,6 +147,7 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         c = inputs['cloth'].cuda()
         cm = inputs['cloth_mask'].cuda()
         batch_size = im.size(0)
+        if batch_size != opt.batch_size: continue
 
         #D_real
         errDg_real = criterionGAN(d_g(im), dis_label_real)
