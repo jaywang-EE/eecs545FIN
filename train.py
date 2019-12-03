@@ -8,13 +8,15 @@ import argparse
 import os
 import time
 from cp_dataset import CPDataset, CPDataLoader
-from networks import GMM, UnetGenerator, VGGLoss, load_checkpoint, save_checkpoint, load_checkpoints, save_checkpoints, Discriminator_G, Discriminator_L
+from networks import GMM, UnetGenerator, VGGLoss, load_checkpoint, save_checkpoint, load_checkpoints, save_checkpoints, Discriminator_G
 
 from tensorboardX import SummaryWriter
 from visualization import board_add_image, board_add_images, save_images, sm_image, combine_images
 
 from datetime import datetime
 import random
+
+
 
 def get_opt():
     parser = argparse.ArgumentParser()
@@ -24,6 +26,8 @@ def get_opt():
     parser.add_argument('-b', '--batch-size', type=int, default=4)
     parser.add_argument('-d', '--debug', type=str, default="debug")
     parser.add_argument('-w', '--winsize', type=int, default=48)
+    parser.add_argument('-n', '--noise', type=float, default=0.1)
+    parser.add_argument('-a', '--alpha', type=float, default=1.0) #weight of local GAN
 
     
     parser.add_argument("--dataroot", default = "data")
@@ -138,8 +142,8 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
 
         #dis_label_noise
         dis_label_noise = random.random()/10
-        dis_label_real = dis_label_real.data.fill_(0.0+random.random()/10)
-        dis_label_fake = dis_label_fake.data.fill_(1.0-random.random()/10)
+        dis_label_real = dis_label_real.data.fill_(0.0+random.random()*opt.noise)
+        dis_label_fake = dis_label_fake.data.fill_(1.0-random.random()*opt.noise)
 
         #prep
         inputs = train_loader.next_batch()
@@ -150,16 +154,13 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         shape = inputs['shape']
 
         agnostic = inputs['agnostic'].cuda()
-        im_r = inputs['rest'].cuda()
         c = inputs['cloth'].cuda()
         cm = inputs['cloth_mask'].cuda()
         batch_size = im.size(0)
         if batch_size != opt.batch_size: continue
 
         #D_real
-        errDg_real = criterionGAN(d_g(im), dis_label_real)
-
-        #sm_image(im_r, "raw_input%d.jpg"%step, opt.debug)
+        errDg_real = criterionGAN(d_g(torch.cat([agnostic, c, im], 1)), dis_label_real)
 
         #generate image
         outputs = model(torch.cat([agnostic, c],1))
@@ -172,17 +173,17 @@ def train_tom(opt, train_loader, model, d_g, d_l, board):
         errDl_real = criterionGAN(d_l(real_crop), dis_label_real)
 
         #tom_train
-        errGg_fake = criterionGAN(d_g(p_tryon), dis_label_G)
+        errGg_fake = criterionGAN(d_g(torch.cat([agnostic, c, p_tryon], 1)), dis_label_G)
         errGl_fake = criterionGAN(d_l(fake_crop), dis_label_G)
 
         loss_l1 = criterionL1(p_tryon, im)
         loss_vgg = criterionVGG(p_tryon, im)
         loss_mask = criterionMask(m_composite, cm)
-        loss_GAN = (errGg_fake+errGl_fake)/(batch_size*2)
+        loss_GAN = (errGg_fake+errGl_fake*opt.alpha)/batch_size
         loss = loss_l1 + loss_vgg + loss_mask + loss_GAN
 
         #D_fake
-        errDg_fake = criterionGAN(d_g(p_tryon.detach()), dis_label_fake)
+        errDg_fake = criterionGAN(d_g(torch.cat([agnostic, c, p_tryon], 1).detach()), dis_label_fake)
         loss_Dg    = (errDg_fake+errDg_real)/2
 
         errDl_fake = criterionGAN(d_l(fake_crop.detach()), dis_label_fake)
@@ -247,7 +248,7 @@ def main():
         save_checkpoint(model, os.path.join(opt.checkpoint_dir, opt.name, 'gmm_final.pth'))
     elif opt.stage == 'TOM':
         model = UnetGenerator(25, 4, 6, ngf=64, norm_layer=nn.InstanceNorm2d)
-        d_g= Discriminator_G(opt)
+        d_g= Discriminator_G(opt, 25+3)
         d_l= Discriminator_G(opt)#vanish L
         if not opt.checkpoint =='' and os.path.exists(opt.checkpoint):
             if not os.path.isdir(opt.checkpoint):
