@@ -39,10 +39,10 @@ class CPDataset(data.Dataset):
                 im_name, c_name = line.strip().split()
                 im_names.append(im_name)
                 c_names.append(c_name)
-        
+
         self.im_names = im_names
         self.c_names = c_names
-        
+
     def name(self):
         return "CPDataset"
 
@@ -76,6 +76,7 @@ class CPDataset(data.Dataset):
         parse_head = (parse_array == 1).astype(np.float32) + \
                 (parse_array == 2).astype(np.float32) + \
                 (parse_array == 4).astype(np.float32) + \
+                (parse_array == 10).astype(np.float32) + \
                 (parse_array == 13).astype(np.float32)
         parse_cloth = (parse_array == 5).astype(np.float32) + \
                 (parse_array == 6).astype(np.float32) + \
@@ -126,15 +127,12 @@ class CPDataset(data.Dataset):
         if self.stage == 'GMM':
             im_g = Image.open('grid.png')
             im_g = self.transform(im_g)
-            im_r = c
         else:
             im_g = ''
-            im_r = (im*(1 - pcm) + pcm)*(1-cm)+c*(cm)
 
         result = {
             'c_name':   c_name,     # for visualization
             'im_name':  im_name,    # for visualization or ground truth
-            'rest':    im_r,        # rest of body
             'cloth':    c,          # for input
             'cloth_mask':     cm,   # for input
             'image':    im,         # for visualization
