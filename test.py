@@ -117,6 +117,7 @@ def test_tom(opt, test_loader, model, board):
         m_composite = F.sigmoid(m_composite)
         p_tryon = c * m_composite + p_rendered * (1 - m_composite)
 
+        save_images(p_tryon, im_names, try_on_dir) 
         '''
         visuals = [ [im_h, shape, im_pose], 
                    [c, 2*cm-1, m_composite], 
