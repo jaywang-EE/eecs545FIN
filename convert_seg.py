@@ -36,11 +36,7 @@ for i in range(256):
 #ref_path = "data/%s/image-parse"
 new_path = "seg/"
 target_path = "seg_one/%s/"
-'''
-path = "seg/image12000parse/008460_0.png"
-plt.imshow(decode(npo(old_path, fn)/256.0, cmap_mask))
-save_arr(seg, (target_path%mode)+fn)
-'''
+
 for dirn in os.listdir(new_path):
     mode = "test" if "test" in dirn else "train"
     old_path = osp.join(new_path, dirn)
