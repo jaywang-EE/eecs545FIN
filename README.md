@@ -1,4 +1,5 @@
-# implementation of eecs545-19F final project, based on cp-VTON
+# DP-VTON
+Implementation of eecs545-19F final project, based on cp-VTON.
 
 ## GMM train
 ```
